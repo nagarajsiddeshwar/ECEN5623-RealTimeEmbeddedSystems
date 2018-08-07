@@ -46,6 +46,7 @@ using namespace std;
         int coordinate_x, coordinate_y;
         bool answer = false;
         int obstaclemovement_count = 0;
+std::vector<int> tracex.tracey;
 
 RNG rng(12345);
 
@@ -228,13 +229,6 @@ waitKey(30);
 
 }
 
-
-
- 
-
-		
-
-  
 
 
 
