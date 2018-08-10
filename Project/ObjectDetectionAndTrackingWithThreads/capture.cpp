@@ -1,10 +1,3 @@
-/*
-   Add sequencer , use a ring buffer for frames
-
-
-*/
-
-
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,8 +76,7 @@ int rectlength, rectheight;
 
 Mat imgOriginal;
 
-cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
-   
+ //cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
 
 pthread_t threads[NUM_THREADS];
 
@@ -102,12 +94,32 @@ Mat imgThresholded;
 
 VideoCapture cap(0);
 
+double start, stop;
+
+double readTOD(void)
+{
+   struct timeval tv;
+ double ft=0.0;
+
+if(gettimeofday(&tv,NULL)!=0)
+{
+  perror("readTOD");
+  return 0.0;
+}
+else 
+{
+ft= ((double)(((double)tv.tv_sec)+(((double)tv.tv_usec)/1000000.0)));
+}
+return ft;
+}
+/*
+
 int delta_t(struct timespec *stop, struct timespec *start, struct timespec *delta_t)
 {
   int dt_sec=stop->tv_sec - start->tv_sec;
   int dt_nsec=stop->tv_nsec - start->tv_nsec;
 
-  /* Calculating the time difference */
+ //  Calculating the time difference 
   if(dt_sec >= 0)
   {
 	if(dt_nsec >= 0)
@@ -134,10 +146,10 @@ int delta_t(struct timespec *stop, struct timespec *start, struct timespec *delt
 	  delta_t->tv_nsec=NSEC_PER_SEC+dt_nsec;
 	}
   }
-  return 1;
+  return(OK);
 }
 
-
+*/ 
 void print_scheduler(void)
 {
 	int schedType;
@@ -173,21 +185,22 @@ void *FrameCapture( void *threadid )
          
          cout << "Cannot open the web cam" << endl;
         
-        return 0;
+        // return -1;
     }
       while (true)
     {
         
-
+/*
 			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_start_time);
 			syslog(LOG_INFO, "FrameCapture thread starts time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_start_time.tv_sec, rtclk_frameCapture_start_time.tv_nsec);
 	
-	
+*/
+	start=readTOD();
 		
 		/* Capturing the input frame from the connected camera device */
 
 pthread_mutex_lock(&frame);
-       // bool bSuccess = cap.read(imgOriginal); // reooad a new frame from video
+     //   bool bSuccess = cap.read(imgOriginal); // reooad a new frame from video
          cap.read(imgOriginal);
 pthread_mutex_unlock(&frame); 
    /*      if (!bSuccess) //if not success, break loop
@@ -195,12 +208,16 @@ pthread_mutex_unlock(&frame);
              cout << "Cannot read a frame from video stream" << endl;
            break;
         }
-	*/		
+	*/	/*	
 			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_stop_time);
 			syslog(LOG_INFO, "FrameCapture thread stop time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_stop_time.tv_sec, rtclk_frameCapture_stop_time.tv_nsec);
 			delta_t(&rtclk_frameCapture_stop_time, &rtclk_frameCapture_start_time, &rtclk_frameCapture_difference);
 			syslog(LOG_INFO, "FrameCapture thread difference time :: sec= %ld :: nsec= %ld \n", rtclk_frameCapture_difference.tv_sec, rtclk_frameCapture_difference.tv_nsec);
-					
+		*/
+ 
+		stop=readTOD();
+syslog(LOG_INFO, "FrameCapture thread difference time msec= %lf \n", (double)(stop-start)*1000);
+               			
 		
 
     }
@@ -213,7 +230,8 @@ pthread_mutex_unlock(&frame);
 {
 syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 	
-   
+    namedWindow("Control", CV_WINDOW_AUTOSIZE); //create a window called "Control"
+
 
 
 
@@ -232,7 +250,7 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 
     while (true)
     {
-        
+        start=readTOD();
        pthread_mutex_lock(&centroid); 
 
         
@@ -280,7 +298,7 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
                 rectheight=(boundRect[i].br().y-boundRect[i].tl().y);
 
 		//  drawContours( drawing, contours_poly, i, color, 1, 8, vector<Vec4i>(), 0, Point() );
-             if((rectlength*rectheight)>(640*480*0.1))
+             if((rectlength*rectheight)>(640*480*0.1*0))
            {
 		rectangle( drawing, boundRect[i].tl(), boundRect[i].br(), color, 2, 8, 0 );
 		Point center_of_rect = (boundRect[i].br() + boundRect[i].tl())*0.5;
@@ -325,9 +343,12 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 		    break; 
 		}
 
-             // output_cap.write( drawing);
+           //   output_cap.write( drawing);
               
           pthread_mutex_unlock(&centroid); 
+		stop=readTOD();
+syslog(LOG_INFO, "Centroid Detection thread difference time msec= %lf \n", (double)(stop-start)*1000);
+               			
   
 }
  pthread_exit(NULL);
@@ -336,7 +357,7 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 void *StoreTracking( void *threadid )
 {
 
-/*
+cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
     while(1)
     {
        
@@ -347,7 +368,7 @@ pthread_mutex_lock(&store);
     }
     
  pthread_exit(NULL);
-*/
+
 }
 
 int main( int argc, char** argv )
@@ -364,7 +385,7 @@ XInitThreads();
     pthread_mutex_init(&centroid, NULL);
  
     pthread_mutex_init(&store, NULL);
-    
+    int rc;
 
 cvNamedWindow("Thresholded Image", CV_WINDOW_AUTOSIZE);
 
@@ -373,9 +394,6 @@ cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
 cvNamedWindow("Contours", CV_WINDOW_AUTOSIZE);
 
 cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
-
-cvNamedWindow("Control", CV_WINDOW_AUTOSIZE); //create a window called "Control"
-
 
      pthread_attr_init(&rt_sched_attr[THREAD_1]);
    pthread_attr_setinheritsched(&rt_sched_attr[THREAD_1], PTHREAD_EXPLICIT_SCHED);
@@ -399,7 +417,7 @@ cvNamedWindow("Control", CV_WINDOW_AUTOSIZE); //create a window called "Control"
    pthread_attr_setschedparam(&rt_sched_attr[THREAD_3], &rt_param[THREAD_3]);
 
    printf("Creating thread %d\n", THREAD_1);
-   int rc = pthread_create(&threads[0], &rt_sched_attr[THREAD_1], FrameCapture, (void *)0);
+   rc = pthread_create(&threads[0], &rt_sched_attr[THREAD_1], FrameCapture, (void *)0);
    if (rc) {printf("ERROR; pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);}
    printf("Thread 1 spawned\n");
 
