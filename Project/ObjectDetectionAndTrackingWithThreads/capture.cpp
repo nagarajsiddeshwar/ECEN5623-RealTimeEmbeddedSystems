@@ -1,3 +1,10 @@
+/*
+   Add sequencer , use a ring buffer for frames
+
+
+*/
+
+
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +21,7 @@
 #include "opencv2/objdetect/objdetect.hpp"
 
 #include <semaphore.h>
-
+//CvCapture* capture;f
 
 #include <string.h>
 
@@ -31,8 +38,29 @@
 #define THREAD_3 	        2
 #define NUM_MSGS 		3
 
+#define NSEC_PER_SEC (1000000000)
+#define ERROR (-1)
+#define OK (0)
+#define MAX_OBJECTS (5)
+
 using namespace cv;
 using namespace std;
+
+static struct timespec rtclk_frameCapture_start_time = {0, 0};
+static struct timespec rtclk_frameCapture_stop_time = {0, 0};
+static struct timespec rtclk_frameCapture_difference = {0,0};
+static struct timespec rtclk_centroidDetection_start_time = {0, 0};
+static struct timespec rtclk_centroidDetection_stop_time = {0, 0};
+static struct timespec rtclk_centroidDetection_difference = {0,0};
+static struct timespec rtclk_obstacleMovement_start_time = {0, 0};
+static struct timespec rtclk_obstacleMovement_stop_time = {0, 0};
+static struct timespec rtclk_obstacleMovement_difference = {0,0};
+static struct timespec rtclk_videoOuput_start_time = {0, 0};
+static struct timespec rtclk_videoOuput_stop_time = {0, 0};
+static struct timespec rtclk_videoOuput_difference = {0,0};
+
+
+
 
   vector<vector<Point> > contours;
   vector<Vec4i> hierarchy;
@@ -55,7 +83,7 @@ int rectlength, rectheight;
 
 Mat imgOriginal;
 
- cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
+ //cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
 
 pthread_t threads[NUM_THREADS];
 
@@ -71,50 +99,119 @@ static sem_t sem_THREAD;
  Mat imgHSV,drawing;
 Mat imgThresholded;
 
-VideoCapture cap(0); 
+VideoCapture cap(0);
+
+int delta_t(struct timespec *stop, struct timespec *start, struct timespec *delta_t)
+{
+  int dt_sec=stop->tv_sec - start->tv_sec;
+  int dt_nsec=stop->tv_nsec - start->tv_nsec;
+
+  /* Calculating the time difference */
+  if(dt_sec >= 0)
+  {
+	if(dt_nsec >= 0)
+	{
+	  delta_t->tv_sec=dt_sec;
+	  delta_t->tv_nsec=dt_nsec;
+	}
+	else
+	{
+	  delta_t->tv_sec=dt_sec-1;
+	  delta_t->tv_nsec=NSEC_PER_SEC+dt_nsec;
+	}
+  }
+  else
+  {
+	if(dt_nsec >= 0)
+	{
+	  delta_t->tv_sec=dt_sec;
+	  delta_t->tv_nsec=dt_nsec;
+	}
+	else
+	{
+	  delta_t->tv_sec=dt_sec-1;
+	  delta_t->tv_nsec=NSEC_PER_SEC+dt_nsec;
+	}
+  }
+  return(OK);
+}
+
+
+void print_scheduler(void)
+{
+	int schedType;
+	schedType = sched_getscheduler(getpid());
+	switch(schedType)
+	{
+		case SCHED_FIFO:
+			syslog(LOG_INFO, "%s", "Pthread Policy is SCHED_FIFO\n");
+		break;
+
+		case SCHED_OTHER:
+			syslog(LOG_INFO, "%s", "Pthread Policy is SCHED_OTHER\n");
+		break;
+
+		case SCHED_RR:
+			syslog(LOG_INFO, "%s", "Pthread Policy is SCHED_RR\n");
+		break;
+
+		default:
+			syslog(LOG_INFO, "%s", "Pthread Policy is UNKNOWN\n");
+		break;
+	}
+}
 
 void *FrameCapture( void *threadid )
 
-//VideoCapture cap;
-
 {
+ 
   //capture the video from web cam
 
     if ( !cap.isOpened() )  // if not success, exit program
     {
-        pthread_mutex_lock(&frame); 
+         
          cout << "Cannot open the web cam" << endl;
-        pthread_mutex_unlock(&frame); 
+        
         // return -1;
     }
       while (true)
     {
         
-        
-        bool bSuccess = cap.read(imgOriginal); // read a new frame from video
 
-         if (!bSuccess) //if not success, break loop
+			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_start_time);
+			syslog(LOG_INFO, "FrameCapture thread starts time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_start_time.tv_sec, rtclk_frameCapture_start_time.tv_nsec);
+	
+	
+		
+		/* Capturing the input frame from the connected camera device */
+
+pthread_mutex_lock(&frame);
+     //   bool bSuccess = cap.read(imgOriginal); // reooad a new frame from video
+         cap.read(imgOriginal);
+pthread_mutex_unlock(&frame); 
+   /*      if (!bSuccess) //if not success, break loop
         {
              cout << "Cannot read a frame from video stream" << endl;
-             break;
+           break;
         }
+	*/		
+			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_stop_time);
+			syslog(LOG_INFO, "FrameCapture thread stop time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_stop_time.tv_sec, rtclk_frameCapture_stop_time.tv_nsec);
+			delta_t(&rtclk_frameCapture_stop_time, &rtclk_frameCapture_start_time, &rtclk_frameCapture_difference);
+			syslog(LOG_INFO, "FrameCapture thread difference time :: sec= %ld :: nsec= %ld \n", rtclk_frameCapture_difference.tv_sec, rtclk_frameCapture_difference.tv_nsec);
+			exit(0);		
+		
+
     }
       pthread_exit(NULL);
+
+
 }
 
     void *CentroidDetection(void * threadid)  //int main( int argc, char** argv ) 
 {
-
-
-/*
-  VideoCapture cap(0); //capture the video from web cam
-
-    if ( !cap.isOpened() )  // if not success, exit program
-    {
-         cout << "Cannot open the web cam" << endl;
-         return -1;
-    }
-*/
+syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
+	
     namedWindow("Control", CV_WINDOW_AUTOSIZE); //create a window called "Control"
 
 
@@ -137,13 +234,6 @@ void *FrameCapture( void *threadid )
     {
         
        pthread_mutex_lock(&centroid); 
-        bool bSuccess = cap.read(imgOriginal); // read a new frame from video
-
-         if (!bSuccess) //if not success, break loop
-        {
-             cout << "Cannot read a frame from video stream" << endl;
-             break;
-        }
 
         
        medianBlur(imgOriginal, imgOriginal, 3);
@@ -220,6 +310,7 @@ void *FrameCapture( void *threadid )
        }
 
 		imshow("Thresholded Image", imgThresholded); //show the thresholded image
+                
 		imshow("Original", imgOriginal); //show the original image
                printf("\n rectlength = %d , rectheight = %d \n", rectlength, rectheight); 
           //     if((rectlength*rectheight)>(640*480*0.1))
@@ -245,7 +336,7 @@ void *FrameCapture( void *threadid )
 void *StoreTracking( void *threadid )
 {
 
-
+cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
     while(1)
     {
        
@@ -264,14 +355,16 @@ int main( int argc, char** argv )
 
 
 XInitThreads();
-	if (sem_init(&sem_THREAD, 0, 1) == -1)
-	{
-		syslog(LOG_ERR, "sem_init for coordinates_sem: failed: %s\n", strerror(errno)); 
-	}
+
     // print_scheduler();
+
+    XInitThreads();
     pthread_mutex_init(&frame, NULL);
-     XInitThreads();
-   //pthread_mutex_init(&frame2centroid, NULL);
+    
+    pthread_mutex_init(&centroid, NULL);
+ 
+    pthread_mutex_init(&store, NULL);
+    
 
 cvNamedWindow("Thresholded Image", CV_WINDOW_AUTOSIZE);
 
