@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include<pthread.h>
+#include <pthread.h>
 #include <X11/Xlib.h>
 #include <sched.h>
 #include <time.h>
@@ -12,11 +12,16 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv/highgui.h>
 #include "opencv2/objdetect/objdetect.hpp"
+#include <opencv/cv.h>
 
 #include <semaphore.h>
 //CvCapture* capture;f
 
 #include <string.h>
+#include <opencv2/core/utility.hpp>
+//#include <opencv2/tracking.hpp>
+#include <opencv2/videoio.hpp>
+
 
 #include <syslog.h>
 #include <math.h>
@@ -24,11 +29,11 @@
 #include <sys/time.h>
 #include <errno.h>
 
-#define NUM_THREADS		3
+#define NUM_THREADS		2
 //#define START_SERVICE 		0
 #define THREAD_1	        0
 #define THREAD_2          	1
-#define THREAD_3 	        2
+//#define THREAD_3 	        2
 #define NUM_MSGS 		3
 
 #define NSEC_PER_SEC (1000000000)
@@ -38,19 +43,6 @@
 
 using namespace cv;
 using namespace std;
-
-static struct timespec rtclk_frameCapture_start_time = {0, 0};
-static struct timespec rtclk_frameCapture_stop_time = {0, 0};
-static struct timespec rtclk_frameCapture_difference = {0,0};
-static struct timespec rtclk_centroidDetection_start_time = {0, 0};
-static struct timespec rtclk_centroidDetection_stop_time = {0, 0};
-static struct timespec rtclk_centroidDetection_difference = {0,0};
-static struct timespec rtclk_obstacleMovement_start_time = {0, 0};
-static struct timespec rtclk_obstacleMovement_stop_time = {0, 0};
-static struct timespec rtclk_obstacleMovement_difference = {0,0};
-static struct timespec rtclk_videoOuput_start_time = {0, 0};
-static struct timespec rtclk_videoOuput_stop_time = {0, 0};
-static struct timespec rtclk_videoOuput_difference = {0,0};
 
 
 
@@ -74,7 +66,7 @@ int rectlength, rectheight;
  int iLowV = 0;
  int iHighV = 255;
 
-Mat imgOriginal;
+Mat imgOriginal,imgHSV,imgThresholded,drawing;
 
  //cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
 
@@ -85,55 +77,49 @@ struct sched_param nrt_param;
 pthread_attr_t rt_sched_attr[NUM_THREADS];
 struct sched_param rt_param[NUM_THREADS];
 
-pthread_mutex_t frame,centroid,store;
+pthread_mutex_t lock1;
 pthread_mutexattr_t rt_safe;
 
-static sem_t sem_THREAD;
- Mat imgHSV,drawing;
-Mat imgThresholded;
+sem_t frame,centroid;
 
 VideoCapture cap(0);
+
 /*
-int delta_t(struct timespec *stop, struct timespec *start, struct timespec *delta_t)
+void *sequencer(void *arg)//sequence_t will point to this
 {
-  int dt_sec=stop->tv_sec - start->tv_sec;
-  int dt_nsec=stop->tv_nsec - start->tv_nsec;
 
-  //Calculating the time difference 
-  if(dt_sec >= 0)
-  {
-	if(dt_nsec >= 0)
-	{
-	  delta_t->tv_sec=dt_sec;
-	  delta_t->tv_nsec=dt_nsec;
+	struct timespec tv1;
+	struct timespec tv2;
+	tv1.tv_sec=0;
+	tv1.tv_nsec=50000000; // 20 Hz
+
+
+	int count=0;
+	while(1)
+	{	
+		if(count%2==0)   // 10 Hz
+		{
+                sem_post(&frame);
+                }
+		
+		if(count%5==0)  // 2 Hz
+		{
+		sem_post(&centroid);
+		}
+		
+
+		count++;
+		nanosleep(&tv1,&tv2);
 	}
-	else
-	{
-	  delta_t->tv_sec=dt_sec-1;
-	  delta_t->tv_nsec=NSEC_PER_SEC+dt_nsec;
-	}
-  }
-  else
-  {
-	if(dt_nsec >= 0)
-	{
-	  delta_t->tv_sec=dt_sec;
-	  delta_t->tv_nsec=dt_nsec;
-	}
-	else
-	{
-	  delta_t->tv_sec=dt_sec-1;
-	  delta_t->tv_nsec=NSEC_PER_SEC+dt_nsec;
-	}
-  }
-  return(OK);
+
 }
-
 */
+
 double readTOD(void)
 {
    struct timeval tv;
  double ft=0.0;
+
 
 if(gettimeofday(&tv,NULL)!=0)
 {
@@ -173,8 +159,9 @@ void print_scheduler(void)
 void *FrameCapture( void *threadid )
 
 {
- 
+ namedWindow("Original", CV_WINDOW_AUTOSIZE);
   //capture the video from web cam
+
 
     if ( !cap.isOpened() )  // if not success, exit program
     {
@@ -185,33 +172,19 @@ void *FrameCapture( void *threadid )
     }
       while (true)
     {
+		//sem_wait(&frame);
                 start=readTOD();
         
-/*
-			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_start_time);
-			syslog(LOG_INFO, "FrameCapture thread starts time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_start_time.tv_sec, rtclk_frameCapture_start_time.tv_nsec);
-*/	
-	
 		
-		/* Capturing the input frame from the connected camera device */
+		// Capturing the input frame from the connected camera device 
 
-pthread_mutex_lock(&frame);
+pthread_mutex_lock(&lock1);
      //   bool bSuccess = cap.read(imgOriginal); // reooad a new frame from video
          cap.read(imgOriginal);
-pthread_mutex_unlock(&frame); 
-   /*      if (!bSuccess) //if not success, break loop
-        {
-             cout << "Cannot read a frame from video stream" << endl;
-           break;
-        }
-	*/	
-/*	
-			clock_gettime(CLOCK_REALTIME, &rtclk_frameCapture_stop_time);
-			syslog(LOG_INFO, "FrameCapture thread stop time :: sec= %ld :: nsec= %ld \n",rtclk_frameCapture_stop_time.tv_sec, rtclk_frameCapture_stop_time.tv_nsec);
-			delta_t(&rtclk_frameCapture_stop_time, &rtclk_frameCapture_start_time, &rtclk_frameCapture_difference);
-			syslog(LOG_INFO, "FrameCapture thread difference time :: sec= %ld :: nsec= %ld \n", rtclk_frameCapture_difference.tv_sec, rtclk_frameCapture_difference.tv_nsec);
-			exit(0);		
-*/
+
+        // imshow("Original",imgOriginal); 
+      //   waitKey(1);
+pthread_mutex_unlock(&lock1); 
 
                          stop=readTOD();
                         syslog(LOG_INFO, "FrameCapture thread difference time msec= %lf \n", (double)(stop-start));
@@ -220,21 +193,16 @@ pthread_mutex_unlock(&frame);
     }
       pthread_exit(NULL);
 
-
 }
 
-    void *CentroidDetection(void * threadid)  //int main( int argc, char** argv ) 
+void *CentroidDetection(void * threadid)  //int main( int argc, char** argv ) 
 {
+ 
 syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
+
 	
     namedWindow("Control", CV_WINDOW_AUTOSIZE); //create a window called "Control"
-
-
-
-
-
- //Create trackbars in "Control" window
- cvCreateTrackbar("LowH", "Control", &iLowH, 179); //Hue (0 - 179)
+       cvCreateTrackbar("LowH", "Control", &iLowH, 179); //Hue (0 - 179)
  cvCreateTrackbar("HighH", "Control", &iHighH, 179);
 
  cvCreateTrackbar("LowS", "Control", &iLowS, 255); //Saturation (0 - 255)
@@ -242,23 +210,16 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 
  cvCreateTrackbar("LowV", "Control", &iLowV, 255); //Value (0 - 255)
  cvCreateTrackbar("HighV", "Control", &iHighV, 255);
-
-  //cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
-
-    while (true)
+  while (true)
     {
+	//sem_wait(&centroid);
         start=readTOD();
-       pthread_mutex_lock(&centroid); 
-
-        
+       pthread_mutex_lock(&lock1); 
        medianBlur(imgOriginal, imgOriginal, 3);
-       medianBlur(imgOriginal, imgOriginal, 3);
-        cvtColor(imgOriginal, imgHSV, COLOR_BGR2HSV); //Convert the captured frame from BGR to HSV
-        blur( imgHSV,imgHSV, Size(3,3) );
- 
-	
-
-	inRange(imgHSV, Scalar(iLowH, iLowS, iLowV), Scalar(iHighH, iHighS, iHighV), imgThresholded); //Threshold the image
+      medianBlur(imgOriginal, imgOriginal, 3);
+       cvtColor(imgOriginal, imgHSV, CV_RGB2HSV);
+       blur( imgHSV,imgHSV, Size(3,3) );
+       	inRange(imgHSV, Scalar(iLowH, iLowS, iLowV), Scalar(iHighH, iHighS, iHighV), imgThresholded); //Threshold the image
 
 	//morphological opening (remove small objects from the foreground)
 	erode(imgThresholded, imgThresholded, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)) );
@@ -269,7 +230,7 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 	erode(imgThresholded, imgThresholded, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)) );
         dilate( imgThresholded, imgThresholded, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)) ); 
 
-	findContours( imgThresholded, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) );
+	findContours( imgThresholded, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0) ); 
 
 	vector<vector<Point> > contours_poly( contours.size() );
 	vector<Rect> boundRect( contours.size() );
@@ -324,13 +285,13 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 	    }
        }
 
-		imshow("Thresholded Image", imgThresholded); //show the thresholded image
+	//	imshow("Thresholded Image", imgThresholded); //show the thresholded image
                 
-		imshow("Original", imgOriginal); //show the original image
+		//imshow("Original", imgOriginal); //show the original image
                printf("\n rectlength = %d , rectheight = %d \n", rectlength, rectheight); 
           //     if((rectlength*rectheight)>(640*480*0.1))
 
-		imshow( "Contours",drawing );
+		//imshow( "Contours",drawing );
 
               //   imshow( "Contours", drawing );
 
@@ -341,33 +302,20 @@ syslog(LOG_INFO, "%s", "Entered Centroid Detection frame \n");
 		}
 
            //   output_cap.write( drawing);
-              
-          pthread_mutex_unlock(&centroid); 
+  
+
+ 
+          pthread_mutex_unlock(&lock1); 
 
 
                          stop=readTOD();
-                        syslog(LOG_INFO, "FrameCapture thread difference time msec= %lf \n", (double)(stop-start));
-  
+                        syslog(LOG_INFO, "Centroid Detection thread difference time msec= %lf \n", (double)(stop-start));
 }
+
+
  pthread_exit(NULL);
 }
 
-void *StoreTracking( void *threadid )
-{
-
-cv::VideoWriter output_cap("/home/nagarajcs/Desktop/RTES.avi",CV_FOURCC('M','J','P','G'), 1, cv::Size ( 640,480), true);
-    while(1)
-    {
-       
-pthread_mutex_lock(&store); 
-output_cap.write( drawing);
-pthread_mutex_lock(&store); 
-
-    }
-    
- pthread_exit(NULL);
-
-}
 
 int main( int argc, char** argv )
 {
@@ -377,21 +325,14 @@ XInitThreads();
 
     // print_scheduler();
 
-    XInitThreads();
-    pthread_mutex_init(&frame, NULL);
-    
-    pthread_mutex_init(&centroid, NULL);
- 
-    pthread_mutex_init(&store, NULL);
-    
+  
+/*
+	sem_init(&frame, 0, 0);
+        sem_init(&centroid, 0, 0);
+*/	
+	pthread_mutex_init(&lock1, NULL);
+     
 
-cvNamedWindow("Thresholded Image", CV_WINDOW_AUTOSIZE);
-
-cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
-
-cvNamedWindow("Contours", CV_WINDOW_AUTOSIZE);
-
-cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
 
      pthread_attr_init(&rt_sched_attr[THREAD_1]);
    pthread_attr_setinheritsched(&rt_sched_attr[THREAD_1], PTHREAD_EXPLICIT_SCHED);
@@ -401,18 +342,11 @@ cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
    pthread_attr_setinheritsched(&rt_sched_attr[THREAD_2], PTHREAD_EXPLICIT_SCHED);
    pthread_attr_setschedpolicy(&rt_sched_attr[THREAD_2], SCHED_FIFO);
 
-   pthread_attr_init(&rt_sched_attr[THREAD_3]);
-   pthread_attr_setinheritsched(&rt_sched_attr[THREAD_3], PTHREAD_EXPLICIT_SCHED);
-   pthread_attr_setschedpolicy(&rt_sched_attr[THREAD_3], SCHED_FIFO);
-
    rt_param[THREAD_1].sched_priority = 1;
    pthread_attr_setschedparam(&rt_sched_attr[THREAD_1], &rt_param[THREAD_1]);
 
       rt_param[THREAD_2].sched_priority = 2;
    pthread_attr_setschedparam(&rt_sched_attr[THREAD_2], &rt_param[THREAD_2]);
-
-   rt_param[THREAD_3].sched_priority = 3;
-   pthread_attr_setschedparam(&rt_sched_attr[THREAD_3], &rt_param[THREAD_3]);
 
    printf("Creating thread %d\n", THREAD_1);
    int rc = pthread_create(&threads[0], &rt_sched_attr[THREAD_1], FrameCapture, (void *)0);
@@ -424,16 +358,9 @@ cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
    if (rc) {printf("ERROR; pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);}
    printf("Thread 2 spawned\n");
 
-      printf("Creating thread %d\n", THREAD_3);
-   rc = pthread_create(&threads[2], &rt_sched_attr[THREAD_3], StoreTracking, (void *)0);
-   if (rc) {printf("ERROR; pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);}
-   printf("Thread 3 spawned\n");
-
 
     pthread_join(threads[0], NULL);
     pthread_join(threads[1], NULL);
-    pthread_join(threads[2], NULL);
- 
 
    printf("All done\n");
 
